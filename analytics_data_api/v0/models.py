@@ -59,7 +59,6 @@ class CourseEnrollmentDaily(BaseCourseEnrollment):
 
 class CourseEnrollmentModeDaily(BaseCourseEnrollment):
     mode = models.CharField(max_length=255)
-    cumulative_count = models.IntegerField(null=False)
 
     class Meta(BaseCourseEnrollment.Meta):
         db_table = 'course_enrollment_mode_daily'
