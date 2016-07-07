@@ -594,3 +594,15 @@ class CourseProgramMetadataSerializer(ModelSerializerWithCreatedField, DynamicFi
         # excluding course-related fields because the serialized output will be embedded in a course object
         # with those fields already defined
         exclude = ('id', 'created', 'course_id')
+
+
+class CourseAcceptanceSerializer(serializers.Serializer):
+    class Meta(object):
+        model = models.CourseAcceptance
+        fields = (
+            'section',
+            'subsection',
+            'unit',
+            'num_unique_views',
+            'num_views'
+        )

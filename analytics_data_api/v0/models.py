@@ -533,3 +533,17 @@ class ModuleEngagementMetricRanges(BaseCourseModel):
 
     class Meta(BaseCourseModel.Meta):
         db_table = 'module_engagement_metric_ranges'
+
+
+class CourseAcceptance(models.Model):
+    """A count of unique views vs total views on courseware sections."""
+
+    class Meta(object):
+        db_table = 'course_acceptance'
+
+    course_id = models.CharField(db_index=True, max_length=255)
+    section = models.CharField(db_index=True, max_length=255)
+    subsection = models.CharField(db_index=True, max_length=255)
+    unit = models.CharField(max_length=255)
+    num_unique_views = models.IntegerField()
+    num_views = models.IntegerField()
