@@ -700,7 +700,7 @@ class VideosListView(BaseCourseView):
     **Response Values**
 
         Returns a collection of video views and metadata for each video.
-        For each video, the collection the following data.
+        Each collection contains:
 
             * video_id: The ID of the video.
             * encoded_module_id: The encoded module ID.
@@ -718,3 +718,33 @@ class VideosListView(BaseCourseView):
     def apply_date_filtering(self, queryset):
         # no date filtering for videos -- just return the queryset
         return queryset
+
+
+class CourseAcceptanceListView(BaseCourseView):
+    """
+    Get data for the section views in a course.
+
+    **Example request**
+
+        GET /api/v0/courses/{course_id}/acceptance/
+
+    **Response Values**
+
+        Returns a collection of subsection views.
+        For each video, the collection the following data.
+
+            * section: The ID of the courseware section.
+            * subsection: The ID of the courseware subsection.
+            * unit: The number of the courseware unit.
+            * num_unique_views: Unique (user) view count for the subsection.
+            * num_views: Total view count for the subsection.
+    """
+
+    serializer_class = serializers.CourseAcceptanceSerializer
+    allow_empty = False
+    model = models.CourseAcceptance
+
+    def apply_date_filtering(self, queryset):
+        # no date filtering for acceptance -- just return the queryset
+        return queryset
+

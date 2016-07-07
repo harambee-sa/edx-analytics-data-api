@@ -462,3 +462,15 @@ class CourseLearnerMetadataSerializer(serializers.Serializer):
                 })
 
         return engagement_ranges
+
+
+class CourseAcceptanceSerializer(serializers.Serializer):
+    class Meta(object):
+        model = models.CourseAcceptance
+        fields = (
+            'section',
+            'subsection',
+            'unit',
+            'num_unique_views',
+            'num_views'
+        )
