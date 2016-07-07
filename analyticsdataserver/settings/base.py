@@ -300,7 +300,7 @@ REST_FRAMEWORK = {
 
 ########## ANALYTICS DATA API CONFIGURATION
 
-ANALYTICS_DATABASE = 'default'
+ANALYTICS_DATABASE = 'reports'
 DATABASE_ROUTERS = ['analyticsdataserver.router.AnalyticsApiRouter']
 
 ENABLE_ADMIN_SITE = False
