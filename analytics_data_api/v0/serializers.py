@@ -464,7 +464,7 @@ class CourseLearnerMetadataSerializer(serializers.Serializer):
         return engagement_ranges
 
 
-class CourseAcceptanceSerializer(serializers.Serializer):
+class CourseAcceptanceSerializer(serializers.ModelSerializer):
     class Meta(object):
         model = models.CourseAcceptance
         fields = (
