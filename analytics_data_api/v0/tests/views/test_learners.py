@@ -17,7 +17,7 @@ from django.conf import settings
 from django.core import management
 
 from analyticsdataserver.tests import TestCaseWithAuthentication
-from analytics_data_api.constants import engagement_entity_types, engagement_events
+from analytics_data_api.constants import engagement_events
 from analytics_data_api.v0.models import ModuleEngagementMetricRanges
 from analytics_data_api.v0.tests.views import DemoCourseMixin, VerifyCourseIdMixin
 
@@ -569,20 +569,11 @@ class CourseLearnerMetadataTests(DemoCourseMixin, VerifyCourseIdMixin,
             }
         }
         empty_range = {
-            range_type: [None, None] for range_type in ['below_average', 'average', 'above_average']
+            range_type: None for range_type in ['class_rank_bottom', 'class_rank_average', 'class_rank_top']
         }
-        for metric in self.engagement_metrics:
+        for metric in engagement_events.EVENTS:
             empty_engagement_ranges['engagement_ranges'][metric] = copy.deepcopy(empty_range)
         return empty_engagement_ranges
-
-    @property
-    def engagement_metrics(self):
-        """ Convenience method for getting the metric types. """
-        metrics = []
-        for entity_type in engagement_entity_types.AGGREGATE_TYPES:
-            for event in engagement_events.EVENTS[entity_type]:
-                metrics.append('{0}_{1}'.format(entity_type, event))
-        return metrics
 
     def test_no_engagement_ranges(self):
         response = self._get(self.course_id)
@@ -594,7 +585,7 @@ class CourseLearnerMetadataTests(DemoCourseMixin, VerifyCourseIdMixin,
         start_date = datetime.datetime(2015, 7, 1, tzinfo=pytz.utc)
         end_date = datetime.datetime(2015, 7, 21, tzinfo=pytz.utc)
         G(ModuleEngagementMetricRanges, course_id=self.course_id, start_date=start_date, end_date=end_date,
-          metric=metric_type, range_type='high', low_value=90, high_value=6120)
+          metric=metric_type, range_type='normal', low_value=90, high_value=6120)
         expected_ranges = self.empty_engagement_ranges
         expected_ranges['engagement_ranges'].update({
             'date_range': {
@@ -602,9 +593,9 @@ class CourseLearnerMetadataTests(DemoCourseMixin, VerifyCourseIdMixin,
                 'end': '2015-07-21'
             },
             metric_type: {
-                'below_average': [None, None],
-                'average': [None, 90.0],
-                'above_average': [90.0, 6120.0]
+                'class_rank_bottom': None,
+                'class_rank_average': [90.0, 6120.0],
+                'class_rank_top': None
             }
         })
 
@@ -627,18 +618,27 @@ class CourseLearnerMetadataTests(DemoCourseMixin, VerifyCourseIdMixin,
         }
 
         max_value = 1000.0
-        for metric_type in self.engagement_metrics:
+        for metric_type in engagement_events.EVENTS:
             low_ceil = 100.5
             G(ModuleEngagementMetricRanges, course_id=self.course_id, start_date=start_date, end_date=end_date,
               metric=metric_type, range_type='low', low_value=0, high_value=low_ceil)
-            high_floor = 800.8
+            normal_floor = 800.8
             G(ModuleEngagementMetricRanges, course_id=self.course_id, start_date=start_date, end_date=end_date,
-              metric=metric_type, range_type='high', low_value=high_floor, high_value=max_value)
+              metric=metric_type, range_type='normal', low_value=normal_floor, high_value=max_value)
+
             expected['engagement_ranges'][metric_type] = {
-                'below_average': [0.0, low_ceil],
-                'average': [low_ceil, high_floor],
-                'above_average': [high_floor, max_value]
+                'class_rank_average': [normal_floor, max_value],
             }
+            if metric_type == 'problem_attempts_per_completed':
+                expected['engagement_ranges'][metric_type].update({
+                    'class_rank_top': [0.0, low_ceil],
+                    'class_rank_bottom': None
+                })
+            else:
+                expected['engagement_ranges'][metric_type].update({
+                    'class_rank_bottom': [0.0, low_ceil],
+                    'class_rank_top': None
+                })
 
         return expected
 
@@ -647,3 +647,10 @@ class CourseLearnerMetadataTests(DemoCourseMixin, VerifyCourseIdMixin,
         response = self._get(self.course_id)
         self.assertEqual(response.status_code, 200)
         self.assertDictContainsSubset(expected, json.loads(response.content))
+
+    def test_engagement_ranges_fields(self):
+        expected_events = engagement_events.EVENTS
+        response = json.loads(self._get(self.course_id).content)
+        self.assertTrue('engagement_ranges' in response)
+        for event in expected_events:
+            self.assertTrue(event in response['engagement_ranges'])

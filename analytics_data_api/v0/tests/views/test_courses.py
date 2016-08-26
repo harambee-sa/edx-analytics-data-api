@@ -130,22 +130,30 @@ class CourseViewTestCaseMixin(DemoCourseMixin):
 
     def assertIntervalFilteringWorks(self, expected_response, start_date, end_date):
         # If start date is after date of existing data, return a 404
-        date = (start_date + datetime.timedelta(days=30)).strftime(settings.DATE_FORMAT)
+        date = (start_date + datetime.timedelta(days=30)).strftime(settings.DATETIME_FORMAT)
         response = self.authenticated_get(
             '%scourses/%s%s?start_date=%s' % (self.api_root_path, self.course_id, self.path, date))
         self.assertEquals(response.status_code, 404)
 
         # If end date is before date of existing data, return a 404
-        date = (start_date - datetime.timedelta(days=30)).strftime(settings.DATE_FORMAT)
+        date = (start_date - datetime.timedelta(days=30)).strftime(settings.DATETIME_FORMAT)
         response = self.authenticated_get(
             '%scourses/%s%s?end_date=%s' % (self.api_root_path, self.course_id, self.path, date))
         self.assertEquals(response.status_code, 404)
 
         # If data falls in date range, data should be returned
-        start_date = start_date.strftime(settings.DATE_FORMAT)
-        end_date = end_date.strftime(settings.DATE_FORMAT)
+        start = start_date.strftime(settings.DATETIME_FORMAT)
+        end = end_date.strftime(settings.DATETIME_FORMAT)
         response = self.authenticated_get('%scourses/%s%s?start_date=%s&end_date=%s' % (
-            self.api_root_path, self.course_id, self.path, start_date, end_date))
+            self.api_root_path, self.course_id, self.path, start, end))
+        self.assertEquals(response.status_code, 200)
+        self.assertListEqual(response.data, expected_response)
+
+        # Passing dates in DATE_FORMAT still works
+        start = start_date.strftime(settings.DATE_FORMAT)
+        end = end_date.strftime(settings.DATE_FORMAT)
+        response = self.authenticated_get('%scourses/%s%s?start_date=%s&end_date=%s' % (
+            self.api_root_path, self.course_id, self.path, start, end))
         self.assertEquals(response.status_code, 200)
         self.assertListEqual(response.data, expected_response)
 
@@ -410,10 +418,6 @@ class CourseEnrollmentModeViewTests(CourseEnrollmentViewTestCaseMixin, DefaultFi
             G(self.model, course_id=course_id, date=self.date, mode=mode)
 
     def serialize_enrollment(self, enrollment):
-        # Treat audit as honor
-        if enrollment.mode is enrollment_modes.AUDIT:
-            enrollment.mode = enrollment_modes.HONOR
-
         return {
             u'course_id': enrollment.course_id,
             u'date': enrollment.date.strftime(settings.DATE_FORMAT),
@@ -432,10 +436,6 @@ class CourseEnrollmentModeViewTests(CourseEnrollmentViewTestCaseMixin, DefaultFi
             cumulative += ce.cumulative_count
             response[ce.mode] = ce.count
 
-        # Merge the honor and audit modes
-        response[enrollment_modes.HONOR] += response[enrollment_modes.AUDIT]
-        del response[enrollment_modes.AUDIT]
-
         response[enrollment_modes.PROFESSIONAL] += response[enrollment_modes.PROFESSIONAL_NO_ID]
         del response[enrollment_modes.PROFESSIONAL_NO_ID]
 
@@ -453,7 +453,6 @@ class CourseEnrollmentModeViewTests(CourseEnrollmentViewTestCaseMixin, DefaultFi
 
         # Create the expected data
         modes = list(enrollment_modes.ALL)
-        modes.remove(enrollment_modes.AUDIT)
         modes.remove(enrollment_modes.PROFESSIONAL_NO_ID)
 
         expected = {}
@@ -640,6 +639,82 @@ class CourseProblemsListViewTests(DemoCourseMixin, TestCaseWithAuthentication):
         response = self._get_data(self.course_id)
         self.assertEquals(response.status_code, 200)
         self.assertListEqual(response.data, expected)
+
+    def test_get_404(self):
+        """
+        The view should return 404 if no data exists for the course.
+        """
+
+        response = self._get_data('foo/bar/course')
+        self.assertEquals(response.status_code, 404)
+
+
+class CourseProblemsAndTagsListViewTests(DemoCourseMixin, TestCaseWithAuthentication):
+    def _get_data(self, course_id=None):
+        """
+        Retrieve data for the specified course.
+        """
+
+        course_id = course_id or self.course_id
+        url = '/api/v0/courses/{}/problems_and_tags/'.format(course_id)
+        return self.authenticated_get(url)
+
+    def test_get(self):
+        """
+        The view should return data when data exists for the course.
+        """
+
+        # This data should never be returned by the tests below because the course_id doesn't match.
+        G(models.ProblemsAndTags)
+
+        # Create multiple objects here to test the grouping. Add a model with a different module_id to break up the
+        # natural order and ensure the view properly sorts the objects before grouping.
+        module_id = 'i4x://test/problem/1'
+        alt_module_id = 'i4x://test/problem/2'
+
+        tags = {
+            'difficulty': ['Easy', 'Medium', 'Hard'],
+            'learning_outcome': ['Learned nothing', 'Learned a few things', 'Learned everything']
+        }
+
+        created = datetime.datetime.utcnow()
+        alt_created = created + datetime.timedelta(seconds=2)
+
+        G(models.ProblemsAndTags, course_id=self.course_id, module_id=module_id,
+          tag_name='difficulty', tag_value=tags['difficulty'][0],
+          total_submissions=11, correct_submissions=4, created=created)
+        G(models.ProblemsAndTags, course_id=self.course_id, module_id=module_id,
+          tag_name='learning_outcome', tag_value=tags['learning_outcome'][1],
+          total_submissions=11, correct_submissions=4, created=alt_created)
+        G(models.ProblemsAndTags, course_id=self.course_id, module_id=alt_module_id,
+          tag_name='learning_outcome', tag_value=tags['learning_outcome'][2],
+          total_submissions=4, correct_submissions=0, created=created)
+
+        expected = [
+            {
+                'module_id': module_id,
+                'total_submissions': 11,
+                'correct_submissions': 4,
+                'tags': {
+                    'difficulty': 'Easy',
+                    'learning_outcome': 'Learned a few things',
+                },
+                'created': alt_created.strftime(settings.DATETIME_FORMAT)
+            },
+            {
+                'module_id': alt_module_id,
+                'total_submissions': 4,
+                'correct_submissions': 0,
+                'tags': {
+                    'learning_outcome': 'Learned everything',
+                },
+                'created': created.strftime(settings.DATETIME_FORMAT)
+            }
+        ]
+
+        response = self._get_data(self.course_id)
+        self.assertEquals(response.status_code, 200)
+        self.assertListEqual(sorted(response.data), sorted(expected))
 
     def test_get_404(self):
         """

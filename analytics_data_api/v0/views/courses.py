@@ -29,18 +29,19 @@ class BaseCourseView(generics.ListAPIView):
         end_date = request.QUERY_PARAMS.get('end_date')
         timezone = utc
 
-        if start_date:
-            start_date = datetime.datetime.strptime(start_date, settings.DATE_FORMAT)
-            start_date = make_aware(start_date, timezone)
-
-        if end_date:
-            end_date = datetime.datetime.strptime(end_date, settings.DATE_FORMAT)
-            end_date = make_aware(end_date, timezone)
-
-        self.start_date = start_date
-        self.end_date = end_date
+        self.start_date = self.parse_date(start_date, timezone)
+        self.end_date = self.parse_date(end_date, timezone)
 
         return super(BaseCourseView, self).get(request, *args, **kwargs)
+
+    def parse_date(self, date, timezone):
+        if date:
+            try:
+                date = datetime.datetime.strptime(date, settings.DATETIME_FORMAT)
+            except ValueError:
+                date = datetime.datetime.strptime(date, settings.DATE_FORMAT)
+            date = make_aware(date, timezone)
+        return date
 
     def apply_date_filtering(self, queryset):
         raise NotImplementedError
@@ -513,9 +514,6 @@ class CourseEnrollmentModeView(BaseCourseEnrollmentView):
                 total += enrollment.count
                 cumulative_total += enrollment.cumulative_count
 
-            # Merge audit and honor
-            item[enrollment_modes.HONOR] = item.get(enrollment_modes.HONOR, 0) + item.pop(enrollment_modes.AUDIT, 0)
-
             # Merge professional with non verified professional
             item[enrollment_modes.PROFESSIONAL] = \
                 item.get(enrollment_modes.PROFESSIONAL, 0) + item.pop(enrollment_modes.PROFESSIONAL_NO_ID, 0)
@@ -628,9 +626,9 @@ class ProblemsListView(BaseCourseView):
         Returns a collection of submission counts and part IDs for each problem. Each collection contains:
 
             * module_id: The ID of the problem.
-            * total_submissions: Total number of submissions
+            * total_submissions: Total number of submissions.
             * correct_submissions: Total number of *correct* submissions.
-            * part_ids: List of problem part IDs
+            * part_ids: List of problem part IDs.
     """
     serializer_class = serializers.ProblemSerializer
     allow_empty = False
@@ -687,6 +685,53 @@ GROUP BY module_id;
                 row['created'] = datetime.datetime.strptime(created, '%Y-%m-%d %H:%M:%S')
 
         return rows
+
+
+# pylint: disable=abstract-method
+class ProblemsAndTagsListView(BaseCourseView):
+    """
+    Get the problems with the connected tags.
+
+    **Example request**
+
+        GET /api/v0/courses/{course_id}/problems_and_tags/
+
+    **Response Values**
+
+        Returns a collection of submission counts and tags for each problem. Each collection contains:
+
+            * module_id: The ID of the problem.
+            * total_submissions: Total number of submissions.
+            * correct_submissions: Total number of *correct* submissions.
+            * tags: Dictionary that contains pairs "tag key: tag value".
+    """
+    serializer_class = serializers.ProblemsAndTagsSerializer
+    allow_empty = False
+    model = models.ProblemsAndTags
+
+    def get_queryset(self):
+        queryset = self.model.objects.filter(course_id=self.course_id)
+        items = queryset.all()
+
+        result = {}
+
+        for v in items:
+            if v.module_id in result:
+                result[v.module_id]['tags'][v.tag_name] = v.tag_value
+                if result[v.module_id]['created'] < v.created:
+                    result[v.module_id]['created'] = v.created
+            else:
+                result[v.module_id] = {
+                    'module_id': v.module_id,
+                    'total_submissions': v.total_submissions,
+                    'correct_submissions': v.correct_submissions,
+                    'tags': {
+                        v.tag_name: v.tag_value
+                    },
+                    'created': v.created
+                }
+
+        return result.values()
 
 
 class VideosListView(BaseCourseView):

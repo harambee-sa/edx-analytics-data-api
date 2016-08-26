@@ -3,7 +3,6 @@ from django.conf import settings
 from rest_framework import pagination, serializers
 
 from analytics_data_api.constants import (
-    engagement_entity_types,
     engagement_events,
     enrollment_modes,
     genders,
@@ -11,8 +10,9 @@ from analytics_data_api.constants import (
 from analytics_data_api.v0 import models
 
 
-# Below are the enrollment modes supported by this API. The audit and honor enrollment modes are merged into honor.
-ENROLLMENT_MODES = [enrollment_modes.HONOR, enrollment_modes.PROFESSIONAL, enrollment_modes.VERIFIED]
+# Below are the enrollment modes supported by this API.
+ENROLLMENT_MODES = [enrollment_modes.AUDIT, enrollment_modes.CREDIT, enrollment_modes.HONOR,
+                    enrollment_modes.PROFESSIONAL, enrollment_modes.VERIFIED]
 
 
 class CourseActivityByWeekSerializer(serializers.ModelSerializer):
@@ -54,6 +54,18 @@ class ProblemSerializer(serializers.Serializer):
     total_submissions = serializers.IntegerField(default=0)
     correct_submissions = serializers.IntegerField(default=0)
     part_ids = serializers.CharField()
+    created = serializers.DateTimeField(format=settings.DATETIME_FORMAT)
+
+
+class ProblemsAndTagsSerializer(serializers.Serializer):
+    """
+    Serializer for problems and tags.
+    """
+
+    module_id = serializers.CharField(required=True)
+    total_submissions = serializers.IntegerField(default=0)
+    correct_submissions = serializers.IntegerField(default=0)
+    tags = serializers.CharField()
     created = serializers.DateTimeField(format=settings.DATETIME_FORMAT)
 
 
@@ -412,28 +424,26 @@ class DateRangeSerializer(serializers.Serializer):
 
 class EnagementRangeMetricSerializer(serializers.Serializer):
     """
-    Serializes ModuleEngagementMetricRanges (low_range and high_range) into
-    the below_average, average, above_average ranges represented as arrays.
+    Serializes ModuleEngagementMetricRanges ('bottom', 'average', and 'top') into
+    the class_rank_bottom, class_rank_average, and class_rank_top ranges
+    represented as arrays. If any one of the ranges is not defined, it is not
+    included in the serialized output.
     """
-    below_average = serializers.SerializerMethodField('get_below_average_range')
-    average = serializers.SerializerMethodField('get_average_range')
-    above_average = serializers.SerializerMethodField('get_above_average_range')
+    class_rank_bottom = serializers.SerializerMethodField('get_class_rank_bottom')
+    class_rank_average = serializers.SerializerMethodField('get_class_rank_average')
+    class_rank_top = serializers.SerializerMethodField('get_class_rank_top')
 
-    def get_average_range(self, obj):
-        metric_range = [
-            obj['low_range'].high_value if obj['low_range'] else None,
-            obj['high_range'].low_value if obj['high_range'] else None,
-        ]
-        return metric_range
+    def get_class_rank_average(self, obj):
+        return self._transform_range(obj['average'])
 
-    def get_below_average_range(self, obj):
-        return self._get_range(obj['low_range'])
+    def get_class_rank_bottom(self, obj):
+        return self._transform_range(obj['bottom'])
 
-    def get_above_average_range(self, obj):
-        return self._get_range(obj['high_range'])
+    def get_class_rank_top(self, obj):
+        return self._transform_range(obj['top'])
 
-    def _get_range(self, metric_range):
-        return [metric_range.low_value, metric_range.high_value] if metric_range else [None, None]
+    def _transform_range(self, metric_range):
+        return [metric_range.low_value, metric_range.high_value] if metric_range else None
 
 
 class CourseLearnerMetadataSerializer(serializers.Serializer):
@@ -448,17 +458,21 @@ class CourseLearnerMetadataSerializer(serializers.Serializer):
             'date_range': DateRangeSerializer(query_set[0] if len(query_set) else None).data
         }
 
-        # go through each entity and event type combination and fill in the ranges
-        for entity_type in engagement_entity_types.AGGREGATE_TYPES:
-            for event in engagement_events.EVENTS[entity_type]:
-                metric = '{0}_{1}'.format(entity_type, event)
-                low_range_queryset = query_set.filter(metric=metric, range_type='low')
-                high_range_queryset = query_set.filter(metric=metric, range_type='high')
-                engagement_ranges.update({
-                    metric: EnagementRangeMetricSerializer({
-                        'low_range': low_range_queryset[0] if len(low_range_queryset) else None,
-                        'high_range': high_range_queryset[0] if len(high_range_queryset) else None,
-                    }).data
-                })
+        for metric in engagement_events.EVENTS:
+            # construct the range type to class rank pairs
+            ranges_ranks = [('normal', 'average')]
+            if metric == 'problem_attempts_per_completed':
+                ranges_ranks.extend([('low', 'top'), ('high', 'bottom')])
+            else:
+                ranges_ranks.extend([('high', 'top'), ('low', 'bottom')])
+
+            # put together data to be serialized
+            serializer_kwargs = {}
+            for range_type, class_rank_type in ranges_ranks:
+                range_queryset = query_set.filter(metric=metric, range_type=range_type)
+                serializer_kwargs[class_rank_type] = range_queryset[0] if len(range_queryset) else None
+            engagement_ranges.update({
+                metric: EnagementRangeMetricSerializer(serializer_kwargs).data
+            })
 
         return engagement_ranges

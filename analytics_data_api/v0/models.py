@@ -131,6 +131,21 @@ class ProblemResponseAnswerDistribution(BaseProblemResponseAnswerDistribution):
     count = models.IntegerField()
 
 
+class ProblemsAndTags(models.Model):
+    """ Model for the tags_distribution table """
+
+    class Meta(object):
+        db_table = 'tags_distribution'
+
+    course_id = models.CharField(db_index=True, max_length=255)
+    module_id = models.CharField(db_index=True, max_length=255)
+    tag_name = models.CharField(max_length=255)
+    tag_value = models.CharField(max_length=255)
+    total_submissions = models.IntegerField(default=0)
+    correct_submissions = models.IntegerField(default=0)
+    created = models.DateTimeField(auto_now_add=True)
+
+
 class ProblemFirstLastResponseAnswerDistribution(BaseProblemResponseAnswerDistribution):
     """ Updated model for answer_distribution table with counts of first and last attempts at problems. """
 
@@ -398,7 +413,7 @@ class ModuleEngagementTimelineManager(models.Manager):
         queryset = ModuleEngagement.objects.all().filter(course_id=course_id, username=username) \
             .values('date', 'entity_type', 'event') \
             .annotate(total_count=Sum('count')) \
-            .annotate(distinct_entity_count=Count('entity_id')) \
+            .annotate(distinct_entity_count=Count('entity_id', distinct=True)) \
             .order_by('date')
 
         timelines = []
@@ -464,9 +479,9 @@ class ModuleEngagement(models.Model):
 
 class ModuleEngagementMetricRanges(models.Model):
     """
-    Represents the low and high values for a module engagement entity and event pair,
-    known as the metric.  The range_type will either be high or low, bounded by
-    low_value and high_value.
+    Represents the low and high values for a module engagement entity and event
+    pair, known as the metric.  The range_type will either be low, normal, or
+    high, bounded by low_value and high_value.
     """
 
     course_id = models.CharField(db_index=True, max_length=255)

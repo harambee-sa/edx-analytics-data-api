@@ -8,7 +8,7 @@ import random
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from analytics_data_api.v0 import models
-from analytics_data_api.constants import engagement_entity_types, engagement_events
+from analytics_data_api.constants import engagement_events
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -70,9 +70,10 @@ class Command(BaseCommand):
 
         enrollment_mode_ratios = {
             'audit': 0.15,
-            'honor': 0.35,
+            'credit': 0.15,
+            'honor': 0.25,
             'professional': 0.10,
-            'verified': 0.40
+            'verified': 0.35
         }
 
         # Generate birth year ratios
@@ -194,16 +195,17 @@ class Command(BaseCommand):
         current = start_date
         while current < end_date:
             current = current + datetime.timedelta(days=1)
-            for entity_type in engagement_entity_types.INDIVIDUAL_TYPES:
-                for event in engagement_events.EVENTS[entity_type]:
-                    num_events = random.randint(0, max_value)
-                    if num_events:
-                        for _ in xrange(num_events):
-                            count = random.randint(0, max_value / 20)
-                            entity_id = 'an-id-{}-{}'.format(entity_type, event)
-                            models.ModuleEngagement.objects.create(
-                                course_id=course_id, username=username, date=current,
-                                entity_type=entity_type, entity_id=entity_id, event=event, count=count)
+            for metric in engagement_events.INDIVIDUAL_EVENTS:
+                num_events = random.randint(0, max_value)
+                if num_events:
+                    for _ in xrange(num_events):
+                        count = random.randint(0, max_value / 20)
+                        entity_type = metric.split('_', 1)[0]
+                        event = metric.split('_', 1)[1]
+                        entity_id = 'an-id-{}-{}'.format(entity_type, event)
+                        models.ModuleEngagement.objects.create(
+                            course_id=course_id, username=username, date=current,
+                            entity_type=entity_type, entity_id=entity_id, event=event, count=count)
             logger.info("Done!")
 
     def generate_learner_engagement_range_data(self, course_id, start_date, end_date, max_value=100):
@@ -211,26 +213,50 @@ class Command(BaseCommand):
         models.ModuleEngagementMetricRanges.objects.all().delete()
 
         logger.info("Generating engagement range data...")
-        for entity_type in engagement_entity_types.AGGREGATE_TYPES:
-            for event in engagement_events.EVENTS[entity_type]:
-                metric = '{0}_{1}'.format(entity_type, event)
+        for event in engagement_events.EVENTS:
+            low_ceil = random.random() * max_value * 0.5
+            models.ModuleEngagementMetricRanges.objects.create(
+                course_id=course_id, start_date=start_date, end_date=end_date, metric=event,
+                range_type='low', low_value=0, high_value=low_ceil)
+            high_floor = random.random() * max_value * 0.5 + low_ceil
+            models.ModuleEngagementMetricRanges.objects.create(
+                course_id=course_id, start_date=start_date, end_date=end_date, metric=event,
+                range_type='high', low_value=high_floor, high_value=max_value)
 
-                low_ceil = random.random() * max_value * 0.5
-                models.ModuleEngagementMetricRanges.objects.create(
-                    course_id=course_id, start_date=start_date, end_date=end_date, metric=metric,
-                    range_type='low', low_value=0, high_value=low_ceil)
+    def generate_tags_distribution_data(self, course_id):
+        logger.info("Deleting existed tags distribution data...")
+        models.ProblemsAndTags.objects.all().delete()
 
-                high_floor = random.random() * max_value * 0.5 + low_ceil
-                models.ModuleEngagementMetricRanges.objects.create(
-                    course_id=course_id, start_date=start_date, end_date=end_date, metric=metric,
-                    range_type='high', low_value=high_floor, high_value=max_value)
+        module_id_tpl = 'i4x://test/problem/%d'
+        difficulty_tag = ['Easy', 'Medium', 'Hard']
+        learning_outcome_tag = ['Learned nothing', 'Learned a few things', 'Learned everything']
+        problems_num = 50
+        chance_difficulty = 5
+
+        logger.info("Generating new tags distribution data...")
+        for i in xrange(problems_num):
+            module_id = module_id_tpl % i
+            total_submissions = random.randint(0, 100)
+            correct_submissions = random.randint(0, total_submissions)
+
+            models.ProblemsAndTags.objects.create(
+                course_id=course_id, module_id=module_id,
+                tag_name='learning_outcome', tag_value=random.choice(learning_outcome_tag),
+                total_submissions=total_submissions, correct_submissions=correct_submissions
+            )
+            if random.randint(0, chance_difficulty) != chance_difficulty:
+                models.ProblemsAndTags.objects.create(
+                    course_id=course_id, module_id=module_id,
+                    tag_name='difficulty', tag_value=random.choice(difficulty_tag),
+                    total_submissions=total_submissions, correct_submissions=correct_submissions
+                )
 
     def handle(self, *args, **options):
         course_id = options['course_id']
         username = options['username']
         video_id = '0fac49ba'
         video_module_id = 'i4x-edX-DemoX-video-5c90cffecd9b48b188cbfea176bf7fe9'
-        start_date = datetime.datetime(year=2015, month=1, day=1, tzinfo=timezone.utc)
+        start_date = datetime.datetime(year=2016, month=1, day=1, tzinfo=timezone.utc)
 
         num_weeks = options['num_weeks']
         if num_weeks:
@@ -245,3 +271,4 @@ class Command(BaseCommand):
         self.generate_video_timeline_data(video_id)
         self.generate_learner_engagement_data(course_id, username, start_date, end_date)
         self.generate_learner_engagement_range_data(course_id, start_date, end_date)
+        self.generate_tags_distribution_data(course_id)
